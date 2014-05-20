@@ -1,6 +1,8 @@
 #include <stdio.h>
+#include <sys/sysinfo.h>
 #include <string.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <mpi.h>
 #include <math.h>
 
@@ -8,6 +10,13 @@
 #define RIGHT 1
 #define DOWN 2
 #define LEFT 3
+
+#define MIN(a,b) (((a)>(b))? (b):(a))
+
+struct threadArg {
+	int tid,n1,n2,n3,numthreads;
+	double *B,*A,*C;
+};
 
 void my_read(FILE *f,double *p,int time,int size,int offset,int idi,int idj)
 {
@@ -70,12 +79,54 @@ int get(int id,int k,int pos)
 	return x * k + y;
 }
 
+void* worker(void * arg)
+{
+	struct threadArg* myarg = (struct threadArg *)arg;
+
+	for(int i= myarg->tid;i < myarg->n1; i+=myarg->numthreads) 
+	for(int k= 0;k < myarg->n2;k++)
+	for(int j= 0;j < myarg->n3;j++)
+	*(myarg->C + i*myarg->n3 + j) += *(myarg->A + i*myarg->n2 + k) * *(myarg->B + k * myarg->n3 + j);
+
+	return NULL;
+}
+
 void mult(double *A,double *B,double *C,int n1k,int n2k,int n3k)
 {
+	int numthreads;
+	pthread_t *tids;
+	struct threadArg * targs;
+
+/*  
 	for(int i=0;i<n1k;i++)
 	for(int j=0;j<n3k;j++)
 	for(int k=0;k<n2k;k++)
 		*(C + i * n3k + j) += *(A + i * n2k + k) * *(B + k * n3k + j);		
+*/
+	numthreads = MIN(get_nprocs(),n1k);
+	tids = (pthread_t*)malloc(numthreads * sizeof(pthread_t));
+
+	targs = (struct threadArg *)malloc(numthreads*sizeof(struct threadArg));
+	for(int i =0;i < numthreads;i++)
+	{
+		targs[i].tid	=i;
+		targs[i].n1		= n1k;
+		targs[i].n2		= n2k;
+		targs[i].n3		= n3k;
+		targs[i].A		=A;
+		targs[i].B		=B;
+		targs[i].C		=C;
+		targs[i].numthreads=numthreads;
+	}
+
+	for(int i =0;i<numthreads;i++)// 创建线程
+	{
+		pthread_create(&tids[i],NULL,worker,&targs[i]);
+	}
+	for(int i =0;i<numthreads;i++) // 回收线程
+	{
+		pthread_join(tids[i],NULL);
+	}
 }
 
 inline void swap(double * &a,double * &b)
@@ -147,7 +198,9 @@ int main(int argc,char* argv[])
 	{
 		printf("size = %d, %d, %d\n",n1,n2,n3);
 		printf("core = %d*%d\n",k,k);
+		printf("threads = %d\n\n",get_nprocs());
 	}
+
 	A = (double *) malloc(n1k * n2k * sizeof(double));
 	tempA = (double *) malloc(n1k * n2k * sizeof(double));
 	B = (double *) malloc(n2k * n3k * sizeof(double));
@@ -235,5 +288,3 @@ int main(int argc,char* argv[])
     MPI_Finalize();
 	return 0;
 }
-
-
