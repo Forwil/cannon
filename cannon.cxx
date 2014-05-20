@@ -91,18 +91,20 @@ void* worker(void * arg)
 	return NULL;
 }
 
-void mult(double *A,double *B,double *C,int n1k,int n2k,int n3k)
+void naive_mult(double *A,double *B,double *C,int n1k,int n2k,int n3k)
+{
+	for(int i=0;i<n1k;i++)
+	for(int j=0;j<n3k;j++)
+	for(int k=0;k<n2k;k++)
+		*(C + i * n3k + j) += *(A + i * n2k + k) * *(B + k * n3k + j);		
+}
+
+void thread_mult(double *A,double *B,double *C,int n1k,int n2k,int n3k)
 {
 	int numthreads;
 	pthread_t *tids;
 	struct threadArg * targs;
 
-/*  
-	for(int i=0;i<n1k;i++)
-	for(int j=0;j<n3k;j++)
-	for(int k=0;k<n2k;k++)
-		*(C + i * n3k + j) += *(A + i * n2k + k) * *(B + k * n3k + j);		
-*/
 	numthreads = MIN(get_nprocs(),n1k);
 	tids = (pthread_t*)malloc(numthreads * sizeof(pthread_t));
 
@@ -119,11 +121,11 @@ void mult(double *A,double *B,double *C,int n1k,int n2k,int n3k)
 		targs[i].numthreads=numthreads;
 	}
 
-	for(int i =0;i<numthreads;i++)// 创建线程
+	for(int i =0;i<numthreads;i++)
 	{
 		pthread_create(&tids[i],NULL,worker,&targs[i]);
 	}
-	for(int i =0;i<numthreads;i++) // 回收线程
+	for(int i =0;i<numthreads;i++) 
 	{
 		pthread_join(tids[i],NULL);
 	}
@@ -141,21 +143,14 @@ int main(int argc,char* argv[])
 {
 	int id,numprocs;
 	int temp,k,n1,n2,n3,idi,idj,n1k,n2k,n3k,start;
-	double *A,*B,*C,*p,time,*tempA,*tempB;
+	double *A,*B,*C,*p,time,*tempA,*tempB,tt;
   	FILE *fA,*fB,*fC;
     MPI_Init(&argc,&argv);
     MPI_Comm_rank(MPI_COMM_WORLD,&id);
 	MPI_Comm_size(MPI_COMM_WORLD,&numprocs);
 
 	time = MPI_Wtime();	
-
-	k = (int) sqrt(numprocs);
-	if(k*k != numprocs)	
-	{
-		printf("numprocs = %d, is not a square number!\n",numprocs);
-    	MPI_Finalize();
-		return 0;
-	}
+	tt = MPI_Wtime();
 
 	if(!(fA = fopen("A_data", "r"))) {
 		printf("Can't open A_data file\n");
@@ -186,11 +181,18 @@ int main(int argc,char* argv[])
 		MPI_Finalize();
 	}
 
-	if(n1 % k || n2 % k || n3 % k)
+
+	k = (int) sqrt(numprocs);
+	while (n1 % k || n2 % k || n3 % k)
+		k -= 1;
+	numprocs = k*k;
+
+	if(id >= numprocs)	
 	{
-		printf("size must be div by k\n");
-		MPI_Finalize();	
-	}	
+    	MPI_Finalize();
+		return 0;
+	}
+
 	n1k = n1 / k;
 	n2k = n2 / k;
 	n3k = n3 / k;
@@ -198,7 +200,7 @@ int main(int argc,char* argv[])
 	{
 		printf("size = %d, %d, %d\n",n1,n2,n3);
 		printf("core = %d*%d\n",k,k);
-		printf("threads = %d\n\n",get_nprocs());
+		printf("threads = %d\n\n",MIN(n1,get_nprocs()));
 	}
 
 	A = (double *) malloc(n1k * n2k * sizeof(double));
@@ -221,7 +223,7 @@ int main(int argc,char* argv[])
 	}
 
 	memset(C,0,n1k * n3k * sizeof(double));
-	mult(A,B,C,n1k,n2k,n3k);
+	thread_mult(A,B,C,n1k,n2k,n3k);
 	MPI_Barrier(MPI_COMM_WORLD);
 //	printf("id %d first mult done\n",id);
 	for(int i=1;i<k;i++)
@@ -250,7 +252,7 @@ int main(int argc,char* argv[])
 		}
 		swap(A,tempA);
 		swap(B,tempB);
-		mult(A,B,C,n1k,n2k,n3k);
+		thread_mult(A,B,C,n1k,n2k,n3k);
 	}
 	if(!id)
 	{
@@ -282,7 +284,7 @@ int main(int argc,char* argv[])
 	if(!id)
 	{
 		printf("write time = %lf\n",MPI_Wtime()-time);	
-		time = MPI_Wtime();
+		printf("total time = %lf\n",MPI_Wtime()-tt);
 	}
 //	printf("id %d is all done\n",id);
     MPI_Finalize();
