@@ -1,0 +1,8 @@
+size = 1000, 1000, 1000
+core = 4*4
+threads = 24
+
+read time = 0.003986
+calc time = 0.471325
+write time = 0.189503
+total time = 0.665145
